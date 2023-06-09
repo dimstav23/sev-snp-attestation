@@ -201,10 +201,9 @@ def handle_client_connection(client_socket, snpguest, report_dir, cert_file, key
   # Close the SSL socket
   ssl_socket.close()
 
-def run_server(snpguest, report_dir, cert_file, key_file):
+def run_server(ip_addr, port, snpguest, report_dir, cert_file, key_file):
   # Create a TCP socket
-  # server_socket = socket.create_server(('localhost', 8888))
-  server_socket = socket.create_server(('192.168.122.48', 8888))
+  server_socket = socket.create_server((ip_addr, port))
 
   # Accept client connections
   while True:
@@ -222,6 +221,8 @@ if __name__ == '__main__':
 
   # Parse command line arguments
   parser = argparse.ArgumentParser()
+  parser.add_argument('-ip', '--ip_addr', default='192.168.122.48', help="IP address (default: 192.168.122.48)")
+  parser.add_argument('-p',  '--port', default=8888, help="Port to connect (default: 8888)")
   parser.add_argument('-r',  '--report_dir', default='./reports', help="Directory to store attestation reports (default: ./reports)")
   parser.add_argument('-sg', '--snpguest', default='./snpguest/target/debug/snpguest', help="Location of the snpguest utility executable (default: ./snpguest/target/debug/snpguest)")
   parser.add_argument('-s',  '--secrets_dir', default='./srv_secrets', help="Directory to store server's secret (default: ./srv_secrets)")
@@ -241,4 +242,4 @@ if __name__ == '__main__':
 
   # generate_attestation_report(args.snpguest, args.report_dir)
   # Run the server
-  run_server(args.snpguest, args.report_dir, cert_file, key_file)
+  run_server(args.ip_addr, args.port, args.snpguest, args.report_dir, cert_file, key_file)

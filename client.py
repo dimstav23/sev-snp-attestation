@@ -145,12 +145,14 @@ def verify_sev_snp_signature(snpguest, cert_dir, attestation_report):
 def main():
   # Parse command line arguments
   parser = argparse.ArgumentParser()
+  parser.add_argument('-ip', '--ip_addr', default='192.168.122.48', help="Server's IP address (default: 192.168.122.48)")
+  parser.add_argument('-p',  '--port', default=8888, help="Port to connect (default: 8888)")
   parser.add_argument('-s',  '--secrets_dir', default='./clt_secrets', help="Directory to store client's secret (default: ./clt_secrets)")
   parser.add_argument('-k',  '--key_file', default='client.key', help="Name of the client's key file (default: client.key)")
   parser.add_argument('-sc', '--self_cert_file', default='client.pem', help="Name of the client's certificate file (default: client.pem)")
   parser.add_argument('-rc', '--root_cert', default='server.pem', help="Name of the trusted root certificate file (default: server.pem)") # since we have self-signed ceritificates, we make a cert exchange before
   parser.add_argument('-cn', '--common_name', default='localhost', help="Common name to be used as a certificate parameter (default: localhost)")
-  parser.add_argument('-p',  '--processor_model', default='milan', help="Processor type (default: milan)")
+  parser.add_argument('-pm', '--processor_model', default='milan', help="Processor type (default: milan)")
   parser.add_argument('-c',  '--cert_dir', default='./certs', help="Directory to store certificates (default: ./certs)")
   parser.add_argument('-r',  '--report_dir', default='./reports', help="Directory to store attestation reports (default: ./reports)")
   parser.add_argument('-n',  '--report_name', default='attestation_report.bin', help="Name of the attestation report file (default: attestation_report.bin)")
@@ -175,8 +177,7 @@ def main():
     client_certificate = cert_file.read()
 
   # Create a TCP socket
-  # client_socket = socket.create_connection(('localhost', 8888))
-  client_socket = socket.create_connection(('192.168.122.48', 8888))
+  client_socket = socket.create_connection((args.ip_addr, args.port))
 
   # Send the length of the client certificate to the server
   client_socket.send(len(client_certificate).to_bytes(4, byteorder='big'))
