@@ -4,26 +4,25 @@ import os
 import subprocess
 import argparse
 
-def create_dirs(secrets_dir, report_dir):
+def create_dir(dir):
   """
-  Create directories if they don't exist.
-  :param secrets_dir: Directory for secrets
-  :param report_dir: Directory for attestation reports
+  Create a directory if it doesn't exist.
+  :param dir: Directory to be created
   """
-  directories = [secrets_dir, report_dir]
-  for directory in directories:
-    if not os.path.exists(directory):
-      os.makedirs(directory)
+  if not os.path.exists(dir):
+    os.makedirs(dir)
   return
 
 def generate_private_key(key_path):
-  # Generate the private key
-  subprocess.run(["openssl", "genpkey", "-algorithm", "RSA", "-out", key_path])
+  if not os.path.exists(key_path):
+    # Generate the private key
+    subprocess.run(["openssl", "genpkey", "-algorithm", "RSA", "-out", key_path])
   return
 
 def generate_self_signed_cert(key_path, cert_path, common_name):
-  # Generate the self-signed certificate using the private key
-  subprocess.run(["openssl", "req", "-new", "-x509", "-key", key_path, "-out", cert_path, "-subj", "/CN="+common_name])
+  if not os.path.exists(cert_path):
+    # Generate the self-signed certificate using the private key
+    subprocess.run(["openssl", "req", "-new", "-x509", "-key", key_path, "-out", cert_path, "-subj", "/CN="+common_name])
   return
 
 def find_next_avail_idx(report_dir):
@@ -102,7 +101,7 @@ def check_sev_guest_device():
   except subprocess.CalledProcessError:
     return False
 
-def generate_attestation_report(snpguest, report_dir):
+def generate_attestation_report(snpguest, report_dir, clt_folder):
   """
   Generate an attestation report using snpguest.
   :param snpguest: Path to snpguest binary.
@@ -110,10 +109,6 @@ def generate_attestation_report(snpguest, report_dir):
   :return: Path to the generated attestation report if successful.
   :raises: Exception if failed to generate the attestation report.
   """
-  folder_prefix = "clt"
-  index = find_next_avail_idx(report_dir)
-  clt_folder = os.path.join(report_dir, f"{folder_prefix}{index}")
-  create_dir(clt_folder)
   report_file = os.path.join(clt_folder, "attestation_report.bin")
   nonce_file = os.path.join(clt_folder, "random-request-file.txt")
 
@@ -131,13 +126,35 @@ def handle_client_connection(client_socket, snpguest, report_dir, cert_file, key
   Handle client connection and perform SEV-SNP attestation.
   :param client_socket: Client socket object
   """
+
+  # Create the respective client's folder for certificate and report 
+  folder_prefix = "clt"
+  index = find_next_avail_idx(report_dir)
+  clt_folder = os.path.join(report_dir, f"{folder_prefix}{index}")
+  create_dir(clt_folder)
+
+  # Receive the client's certificate
+  client_certificate = client_socket.recv(4096)
+  client_cert_file = os.path.join(clt_folder, f"clt{index}_cert.pem")
+  # Store the server's certificate to use it at load_verify_locations
+  with open(client_cert_file, 'wb') as client_cert:
+    client_cert.write(client_certificate)
+
+  # Read the server certificate
+  with open(cert_file, 'rb') as cert:
+    server_certificate = cert.read()
+  # Send the server certificate to the client
+  client_socket.sendall(server_certificate)
+
   # Create an SSL context
   context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-  context.load_cert_chain(certfile=cert_file, keyfile=key_file) 
   
-  # Require client certificate
+  # Require client certificate and set the custom verification callback
   context.verify_mode = ssl.CERT_REQUIRED
-  # context.load_verify_locations(cafile=client_cert_file)
+
+  # Load the server certificate and private key
+  context.load_cert_chain(certfile=cert_file, keyfile=key_file)
+  context.load_verify_locations(cafile=client_cert_file)
 
   # Wrap the socket with SSL/TLS
   ssl_socket = context.wrap_socket(client_socket, server_side=True)
@@ -146,16 +163,14 @@ def handle_client_connection(client_socket, snpguest, report_dir, cert_file, key
     # Perform TLS handshake
     ssl_socket.do_handshake()
 
-    # Verify and save the client certificate
-    client_cert = ssl_socket.getpeercert()
-    # save_client_certificate(client_cert)  # Implement this function to save the client certificate to a file
-
     # Perform AMD SEV-SNP attestation
     try:
-      attestation_report = generate_attestation_report(snpguest, report_dir)
+      attestation_report = generate_attestation_report(snpguest, report_dir, clt_folder)
       print(f"Attestation report generated successfully: {attestation_report}")
     except Exception as e:
       print(f"Error: {str(e)}")
+      ssl_socket.close()
+      return
 
     # Read the attestation report file
     with open(attestation_report, "rb") as file:
@@ -194,7 +209,7 @@ def run_server(snpguest, report_dir, cert_file, key_file):
 if __name__ == '__main__':
   # Check if the sev-guest kernel module is loaded and
   # if the /dev/sev-guest device is present
-  if (not prep_sev_guest_kernel_module):
+  if (not prep_sev_guest_kernel_module()):
     exit()
 
   # Parse command line arguments
@@ -207,7 +222,8 @@ if __name__ == '__main__':
   parser.add_argument('-cn', '--common_name', default='localhost', help="Common name to be used as a certificate parameter (default: localhost)")
   args = parser.parse_args()
 
-  create_dirs(args.secrets_dir, args.report_dir)
+  create_dir(args.secrets_dir)
+  create_dir(args.report_dir)
 
   # Generate client private key and self-signed certificate
   key_file = os.path.join(args.secrets_dir, args.key_file)
@@ -217,4 +233,4 @@ if __name__ == '__main__':
 
   # generate_attestation_report(args.snpguest, args.report_dir)
   # Run the server
-  run_server(args.snpguest, args.report_dir, cert_file, cert_file)
+  run_server(args.snpguest, args.report_dir, cert_file, key_file)

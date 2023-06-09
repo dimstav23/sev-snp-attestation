@@ -19,13 +19,15 @@ def create_dirs(secrets_dir, cert_dir, report_dir):
   return
 
 def generate_private_key(key_path):
-  # Generate the private key
-  subprocess.run(["openssl", "genpkey", "-algorithm", "RSA", "-out", key_path])
+  if not os.path.exists(key_path):
+    # Generate the private key
+    subprocess.run(["openssl", "genpkey", "-algorithm", "RSA", "-out", key_path])
   return
 
 def generate_self_signed_cert(key_path, cert_path, common_name):
-  # Generate the self-signed certificate using the private key
-  subprocess.run(["openssl", "req", "-new", "-x509", "-key", key_path, "-out", cert_path, "-subj", "/CN="+common_name])
+  if not os.path.exists(cert_path):
+    # Generate the self-signed certificate using the private key
+    subprocess.run(["openssl", "req", "-new", "-x509", "-key", key_path, "-out", cert_path, "-subj", "/CN="+common_name])
   return
 
 def verify_attestation_report(snpguest, attestation_report, processor_model, cert_dir):
@@ -146,6 +148,7 @@ def main():
   parser.add_argument('-s',  '--secrets_dir', default='./clt_secrets', help="Directory to store client's secret (default: ./clt_secrets)")
   parser.add_argument('-k',  '--key_file', default='client.key', help="Name of the client's key file (default: client.key)")
   parser.add_argument('-sc', '--self_cert_file', default='client.pem', help="Name of the client's certificate file (default: client.pem)")
+  parser.add_argument('-rc', '--root_cert', default='server.pem', help="Name of the trusted root certificate file (default: server.pem)") # since we have self-signed ceritificates, we make a cert exchange before
   parser.add_argument('-cn', '--common_name', default='localhost', help="Common name to be used as a certificate parameter (default: localhost)")
   parser.add_argument('-p',  '--processor_model', default='milan', help="Processor type (default: milan)")
   parser.add_argument('-c',  '--cert_dir', default='./certs', help="Directory to store certificates (default: ./certs)")
@@ -167,20 +170,31 @@ def main():
   cert_path = os.path.join(args.secrets_dir, args.self_cert_file)
   generate_self_signed_cert(key_path, cert_path, args.common_name)
 
+  # Read the client certificate
+  with open(cert_path, 'rb') as cert_file:
+    client_certificate = cert_file.read()
+
   # Create a TCP socket
   # client_socket = socket.create_connection(('localhost', 8888))
   client_socket = socket.create_connection(('192.168.122.48', 8888))
 
+  # Send the client certificate to the server
+  client_socket.sendall(client_certificate)
+
+  # Receive the server's certificate
+  server_certificate = client_socket.recv(4096)
+  server_cert_file = os.path.join(args.cert_dir, args.root_cert)
+  # Store the server's certificate to use it at load_verify_locations
+  with open(server_cert_file, 'wb') as server_cert:
+    server_cert.write(server_certificate)
+
   # Create an SSL context
   context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+  context.verify_mode = ssl.CERT_REQUIRED
 
   # Load client private key and certificate
   context.load_cert_chain(certfile=cert_path, keyfile=key_path)
-
-  # context.load_verify_locations(cafile="./secrets/server.crt")
-
-  # # Require server certificate verification
-  # context.verify_mode = ssl.CERT_REQUIRED
+  context.load_verify_locations(cafile=server_cert_file)
 
   # Wrap the socket with SSL/TLS
   ssl_socket = context.wrap_socket(client_socket, server_side=False, server_hostname='localhost')
@@ -189,11 +203,8 @@ def main():
     # Perform TLS handshake
     ssl_socket.do_handshake()
 
-    # Send the client certificate to the server
-    ssl_socket.send(cert_path)
-
     # Receive attestation report from the server
-    attestation_report = ssl_socket.recv()
+    attestation_report = ssl_socket.recv(4096)
 
     # Save attestation report to a file
     report_path = os.path.join(args.report_dir, args.report_name)
