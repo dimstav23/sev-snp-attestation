@@ -201,7 +201,6 @@ def run_client(ip_addr, port, snpguest, secrets_dir, key_file, self_cert_file, r
   context.verify_mode = ssl.CERT_REQUIRED
 
   # Load client private key and certificate
-  print(cert_path, key_path)
   context.load_cert_chain(certfile=cert_path, keyfile=key_path)
   context.load_verify_locations(cafile=server_cert_file)
 

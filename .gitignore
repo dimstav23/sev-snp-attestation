@@ -1,0 +1,4 @@
+certs/
+clt_secrets/
+srv_secrets/
+reports/
