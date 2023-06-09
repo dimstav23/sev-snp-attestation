@@ -121,10 +121,39 @@ def generate_attestation_report(snpguest, report_dir, clt_folder):
     error_message = f"Failed to generate attestation report. {e}"
     raise Exception(error_message)
 
-def handle_client_connection(client_socket, snpguest, report_dir, cert_file, key_file):
+def exchange_certificates(client_socket, client_cert_file, server_cert_file):
+  """
+  Perform certificate exchange between client and server.
+  :param client_socket: Client socket object
+  :param client_cert_file: File path of the client's certificate
+  :param server_cert_file: File path of the server's certificate
+  """
+  # Receive the client's certificate length
+  client_cert_len = int.from_bytes(client_socket.recv(4), byteorder='big')
+  # Receive the client's certificate
+  client_certificate = client_socket.recv(client_cert_len)
+
+  # Store the client's certificate
+  with open(client_cert_file, 'wb') as client_cert:
+    client_cert.write(client_certificate)
+
+  # Read the server certificate
+  with open(server_cert_file, 'rb') as cert:
+    server_certificate = cert.read()
+
+  # Send the length of the server certificate to the client
+  client_socket.send(len(server_certificate).to_bytes(4, byteorder='big'))
+  # Send the server certificate to the client
+  client_socket.sendall(server_certificate)
+
+def handle_client_connection(client_socket, snpguest, report_dir, cert_path, key_file):
   """
   Handle client connection and perform SEV-SNP attestation.
   :param client_socket: Client socket object
+  :param snpguest: Path to snpguest utility executable
+  :param report_dir: Directory to store attestation reports
+  :param cert_path: File path of the server's certificate
+  :param key_file: File path of the server's private key
   """
 
   # Create the respective client's folder for certificate and report 
@@ -133,24 +162,9 @@ def handle_client_connection(client_socket, snpguest, report_dir, cert_file, key
   clt_folder = os.path.join(report_dir, f"{folder_prefix}{index}")
   create_dir(clt_folder)
 
-  # Receive the client's certificate length
-  client_cert_len = int.from_bytes(client_socket.recv(4), byteorder='big')
-  # Receive the client's certificate
-  client_certificate = client_socket.recv(client_cert_len)
-
+  # Perform certificate exchange between client and server
   client_cert_file = os.path.join(clt_folder, f"clt{index}_cert.pem")
-  # Store the server's certificate to use it at load_verify_locations
-  with open(client_cert_file, 'wb') as client_cert:
-    client_cert.write(client_certificate)
-
-  # Read the server certificate
-  with open(cert_file, 'rb') as cert:
-    server_certificate = cert.read()
-
-  # Send the length of the server certificate to the server
-  client_socket.send(len(server_certificate).to_bytes(4, byteorder='big'))
-  # Send the server certificate to the client
-  client_socket.sendall(server_certificate)
+  exchange_certificates(client_socket, client_cert_file, cert_path)
 
   # Create an SSL context
   context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
@@ -159,7 +173,7 @@ def handle_client_connection(client_socket, snpguest, report_dir, cert_file, key
   context.verify_mode = ssl.CERT_REQUIRED
 
   # Load the server certificate and private key
-  context.load_cert_chain(certfile=cert_file, keyfile=key_file)
+  context.load_cert_chain(certfile=cert_path, keyfile=key_file)
   context.load_verify_locations(cafile=client_cert_file)
 
   # Wrap the socket with SSL/TLS
@@ -201,19 +215,28 @@ def handle_client_connection(client_socket, snpguest, report_dir, cert_file, key
   # Close the SSL socket
   ssl_socket.close()
 
-def run_server(ip_addr, port, snpguest, report_dir, cert_file, key_file):
+def run_server(ip_addr, port, snpguest, report_dir, cert_path, key_file):
+  """
+  Run the server and listen for client connections.
+  :param ip_addr: IP address to bind the server socket
+  :param port: Port to listen for connections
+  :param snpguest: Path to snpguest utility executable
+  :param report_dir: Directory to store attestation reports
+  :param cert_path: File path of the server's certificate
+  :param key_file: File path of the server's private key
+  """
   # Create a TCP socket
   server_socket = socket.create_server((ip_addr, port))
 
   # Accept client connections
   while True:
     client_socket, client_address = server_socket.accept()
-    handle_client_connection(client_socket, snpguest, report_dir, cert_file, key_file)
+    handle_client_connection(client_socket, snpguest, report_dir, cert_path, key_file)
 
   # Close the server socket
   server_socket.close()
 
-if __name__ == '__main__':
+def main():
   # Check if the sev-guest kernel module is loaded and
   # if the /dev/sev-guest device is present
   if (not prep_sev_guest_kernel_module()):
@@ -237,9 +260,12 @@ if __name__ == '__main__':
   # Generate client private key and self-signed certificate
   key_file = os.path.join(args.secrets_dir, args.key_file)
   generate_private_key(key_file)
-  cert_file = os.path.join(args.secrets_dir, args.self_cert_file)
-  generate_self_signed_cert(key_file, cert_file, args.common_name)
+  cert_path = os.path.join(args.secrets_dir, args.self_cert_file)
+  generate_self_signed_cert(key_file, cert_path, args.common_name)
 
   # generate_attestation_report(args.snpguest, args.report_dir)
   # Run the server
-  run_server(args.ip_addr, args.port, args.snpguest, args.report_dir, cert_file, key_file)
+  run_server(args.ip_addr, args.port, args.snpguest, args.report_dir, cert_path, key_file)
+
+if __name__ == '__main__':
+  main()

@@ -142,6 +142,102 @@ def verify_sev_snp_signature(snpguest, cert_dir, attestation_report):
   print(output_verify_signature)
   return True
 
+def exchange_certificates(client_socket, client_cert_file, server_cert_file):
+  """
+  Perform certificate exchange between client and server.
+  :param client_socket: Client socket object
+  :param client_cert_file: File path of the client's certificate
+  :param server_cert_file: File path of the server's certificate
+  """
+  # Read the client certificate
+  with open(client_cert_file, 'rb') as cert_file:
+    client_certificate = cert_file.read()
+
+  # Send the length of the client certificate to the server
+  client_socket.send(len(client_certificate).to_bytes(4, byteorder='big'))
+  # Send the client certificate to the server
+  client_socket.sendall(client_certificate)
+
+  # Receive the server's certificate length
+  server_cert_len = int.from_bytes(client_socket.recv(4), byteorder='big')
+  # Receive the server's certificate
+  server_certificate = client_socket.recv(server_cert_len)
+
+  # Store the server's certificate to use it at load_verify_locations
+  with open(server_cert_file, 'wb') as server_cert:
+    server_cert.write(server_certificate)
+
+def run_client(ip_addr, port, snpguest, secrets_dir, key_file, self_cert_file, root_cert, common_name, processor_model, cert_dir, report_dir, report_name):
+  """
+  Run the client and perform SEV-SNP attestation with the server.
+  :param ip_addr: Server's IP address
+  :param port: Port to connect
+  :param snpguest: Path to snpguest utility executable
+  :param secrets_dir: Directory to store client's secret
+  :param key_file: Name of the client's key file
+  :param self_cert_file: Name of the client's certificate file
+  :param root_cert: Name of the trusted root certificate file
+  :param common_name: Common name to be used as a certificate parameter
+  :param processor_model: Processor type
+  :param cert_dir: Directory to store certificates
+  :param report_dir: Directory to store attestation reports
+  :param report_name: Name of the attestation report file
+  """
+  # Generate client private key and self-signed certificate
+  key_path = os.path.join(secrets_dir, key_file)
+  generate_private_key(key_path)
+  cert_path = os.path.join(secrets_dir, self_cert_file)
+  generate_self_signed_cert(key_path, cert_path, common_name)
+
+  # Create a TCP socket
+  client_socket = socket.create_connection((ip_addr, port))
+
+  # Perform certificate exchange between client and server
+  server_cert_file = os.path.join(cert_dir,root_cert)
+  exchange_certificates(client_socket, cert_path, server_cert_file)
+
+  # Create an SSL context
+  context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+  context.verify_mode = ssl.CERT_REQUIRED
+
+  # Load client private key and certificate
+  print(cert_path, key_path)
+  context.load_cert_chain(certfile=cert_path, keyfile=key_path)
+  context.load_verify_locations(cafile=server_cert_file)
+
+  # Wrap the socket with SSL/TLS
+  ssl_socket = context.wrap_socket(client_socket, server_side=False, server_hostname='localhost')
+
+  try:
+    # Perform TLS handshake
+    ssl_socket.do_handshake()
+
+    # Receive the server's certificate length
+    attestation_report_len = int.from_bytes(ssl_socket.recv(4), byteorder='big')
+    # Receive attestation report from the server
+    attestation_report = ssl_socket.recv(attestation_report_len)
+
+    # Save attestation report to a file
+    report_path = os.path.join(report_dir, report_name)
+    with open(report_path, 'wb') as report_file:
+      report_file.write(attestation_report)
+
+    # Verify server's attestation report
+    if verify_attestation_report(snpguest, report_path, processor_model, cert_dir):
+      # Attestation successful, continue using the TLS channel for communication
+      message = "Hello, server!"
+      ssl_socket.send(message.encode())
+      response = ssl_socket.recv(1024).decode()
+      print("Received from server:", response)
+    else:
+      print("Attestation failed.")
+
+  except ssl.SSLError:
+    print("TLS handshake failed.")
+
+  # Close the SSL socket
+  ssl_socket.close()
+
 def main():
   # Parse command line arguments
   parser = argparse.ArgumentParser()
@@ -164,77 +260,22 @@ def main():
     return
 
   create_dirs(args.secrets_dir, args.cert_dir, args.report_dir)
-  report_path = os.path.join(args.report_dir, args.report_name)
 
-  # Generate client private key and self-signed certificate
-  key_path = os.path.join(args.secrets_dir, args.key_file)
-  generate_private_key(key_path)
-  cert_path = os.path.join(args.secrets_dir, args.self_cert_file)
-  generate_self_signed_cert(key_path, cert_path, args.common_name)
-
-  # Read the client certificate
-  with open(cert_path, 'rb') as cert_file:
-    client_certificate = cert_file.read()
-
-  # Create a TCP socket
-  client_socket = socket.create_connection((args.ip_addr, args.port))
-
-  # Send the length of the client certificate to the server
-  client_socket.send(len(client_certificate).to_bytes(4, byteorder='big'))
-  # Send the client certificate to the server
-  client_socket.sendall(client_certificate)
-  
-  # Receive the server's certificate length
-  server_cert_len = int.from_bytes(client_socket.recv(4), byteorder='big')
-  # Receive the server's certificate
-  server_certificate = client_socket.recv(server_cert_len)
-
-  server_cert_file = os.path.join(args.cert_dir, args.root_cert)
-  # Store the server's certificate to use it at load_verify_locations
-  with open(server_cert_file, 'wb') as server_cert:
-    server_cert.write(server_certificate)
-
-  # Create an SSL context
-  context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
-  context.verify_mode = ssl.CERT_REQUIRED
-
-  # Load client private key and certificate
-  context.load_cert_chain(certfile=cert_path, keyfile=key_path)
-  context.load_verify_locations(cafile=server_cert_file)
-
-  # Wrap the socket with SSL/TLS
-  ssl_socket = context.wrap_socket(client_socket, server_side=False, server_hostname='localhost')
-
-  try:
-    # Perform TLS handshake
-    ssl_socket.do_handshake()
-
-    # Receive the server's certificate length
-    attestation_report_len = int.from_bytes(ssl_socket.recv(4), byteorder='big')
-    # Receive attestation report from the server
-    attestation_report = ssl_socket.recv(attestation_report_len)
-
-    # Save attestation report to a file
-    report_path = os.path.join(args.report_dir, args.report_name)
-    with open(report_path, 'wb') as report_file:
-      report_file.write(attestation_report)
-
-    # Verify server's attestation report
-    if verify_attestation_report(args.snpguest, report_path, args.processor_model, args.cert_dir):
-      # Attestation successful, continue using the TLS channel for communication
-      message = "Hello, server!"
-      ssl_socket.send(message.encode())
-      response = ssl_socket.recv(1024).decode()
-      print("Received from server:", response)
-    else:
-      print("Attestation failed.")
-
-  except ssl.SSLError:
-    print("TLS handshake failed.")
-
-  # Close the SSL socket
-  ssl_socket.close()
-
+  # Run the client and perform attestation
+  run_client(
+    args.ip_addr,
+    args.port,
+    args.snpguest,
+    args.secrets_dir,
+    args.key_file,
+    args.self_cert_file,
+    args.root_cert,
+    args.common_name,
+    args.processor_model,
+    args.cert_dir,
+    args.report_dir,
+    args.report_name
+  )
 
 if __name__ == '__main__':
   main()

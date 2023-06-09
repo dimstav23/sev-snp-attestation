@@ -29,7 +29,7 @@ The server script (`server.py`) performs the following tasks:
 ### Usage
 To run the server script, use the following command:
 ```
-python server.py [-ip IP_ADDR] [-p PORT] [-r REPORT_DIR] [-sg SNPGUEST_PATH] [-s SECRETS_DIR] [-k KEY_FILE] [-sc SELF_CERT_FILE] [-cn COMMON_NAME]
+python3 server.py [-ip IP_ADDR] [-p PORT] [-r REPORT_DIR] [-sg SNPGUEST_PATH] [-s SECRETS_DIR] [-k KEY_FILE] [-sc SELF_CERT_FILE] [-cn COMMON_NAME]
 ```
 
 The command line arguments are as follows:
@@ -60,7 +60,7 @@ The client script (`client.py`) performs the following tasks:
 ### Usage
 To run the client script, use the following command:
 ```
-python client.py [-ip IP_ADDR] [-p PORT] [-s SECRETS_DIR] [-k KEY_FILE] [-sc SELF_CERT_FILE] [-rc ROOT_CERT] [-cn COMMON_NAME] [-pm PROCESSOR_MODEL] [-c CERT_DIR] [-r REPORT_DIR] [-n REPORT_NAME] [-sg SNPGUEST_PATH]
+python3 client.py [-ip IP_ADDR] [-p PORT] [-s SECRETS_DIR] [-k KEY_FILE] [-sc SELF_CERT_FILE] [-rc ROOT_CERT] [-cn COMMON_NAME] [-pm PROCESSOR_MODEL] [-c CERT_DIR] [-r REPORT_DIR] [-n REPORT_NAME] [-sg SNPGUEST_PATH]
 ```
 
 The command line arguments are as follows:
@@ -81,11 +81,11 @@ The command line arguments are as follows:
 ## Example Workflow
 1. Start the server by running the following command inside a SEV-SNP VM (`sudo` rights required):
 ```
-python server.py
+python3 server.py
 ```
 2. In a separate terminal, start the client by running the following command (adapt the parameters if needed):
 ```
-python client.py
+python3 client.py
 ```
 The server and client will perform the SEV-SNP attestation process, and the client will receive the server's attestation report. 
 The client can then verify the attestation report using the `snpguest` utility.
