@@ -133,8 +133,11 @@ def handle_client_connection(client_socket, snpguest, report_dir, cert_file, key
   clt_folder = os.path.join(report_dir, f"{folder_prefix}{index}")
   create_dir(clt_folder)
 
+  # Receive the client's certificate length
+  client_cert_len = int.from_bytes(client_socket.recv(4), byteorder='big')
   # Receive the client's certificate
-  client_certificate = client_socket.recv(4096)
+  client_certificate = client_socket.recv(client_cert_len)
+
   client_cert_file = os.path.join(clt_folder, f"clt{index}_cert.pem")
   # Store the server's certificate to use it at load_verify_locations
   with open(client_cert_file, 'wb') as client_cert:
@@ -143,6 +146,9 @@ def handle_client_connection(client_socket, snpguest, report_dir, cert_file, key
   # Read the server certificate
   with open(cert_file, 'rb') as cert:
     server_certificate = cert.read()
+
+  # Send the length of the server certificate to the server
+  client_socket.send(len(server_certificate).to_bytes(4, byteorder='big'))
   # Send the server certificate to the client
   client_socket.sendall(server_certificate)
 
@@ -176,6 +182,8 @@ def handle_client_connection(client_socket, snpguest, report_dir, cert_file, key
     with open(attestation_report, "rb") as file:
       report_content = file.read()
 
+    # Send the length of the attestation report to the client
+    ssl_socket.send(len(report_content).to_bytes(4, byteorder='big'))
     # Send the attestation report to the client
     ssl_socket.sendall(report_content)
 

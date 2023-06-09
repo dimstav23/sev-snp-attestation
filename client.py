@@ -178,11 +178,16 @@ def main():
   # client_socket = socket.create_connection(('localhost', 8888))
   client_socket = socket.create_connection(('192.168.122.48', 8888))
 
+  # Send the length of the client certificate to the server
+  client_socket.send(len(client_certificate).to_bytes(4, byteorder='big'))
   # Send the client certificate to the server
   client_socket.sendall(client_certificate)
-
+  
+  # Receive the server's certificate length
+  server_cert_len = int.from_bytes(client_socket.recv(4), byteorder='big')
   # Receive the server's certificate
-  server_certificate = client_socket.recv(4096)
+  server_certificate = client_socket.recv(server_cert_len)
+
   server_cert_file = os.path.join(args.cert_dir, args.root_cert)
   # Store the server's certificate to use it at load_verify_locations
   with open(server_cert_file, 'wb') as server_cert:
@@ -203,8 +208,10 @@ def main():
     # Perform TLS handshake
     ssl_socket.do_handshake()
 
+    # Receive the server's certificate length
+    attestation_report_len = int.from_bytes(ssl_socket.recv(4), byteorder='big')
     # Receive attestation report from the server
-    attestation_report = ssl_socket.recv(4096)
+    attestation_report = ssl_socket.recv(attestation_report_len)
 
     # Save attestation report to a file
     report_path = os.path.join(args.report_dir, args.report_name)
